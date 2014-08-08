@@ -108,7 +108,7 @@
 #define DHCP_DESTINATION_PORT 0x4300
 
 static sme_QosWmmUpType hddWmmDscpToUpMap[WLAN_HDD_MAX_DSCP+1];
-
+#define HDD_WMM_UP_TO_AC_MAP_SIZE 8
 const v_U8_t hddWmmUpToAcMap[] = {
    WLANTL_AC_BE,
    WLANTL_AC_BK,
@@ -1880,7 +1880,7 @@ v_U16_t hdd_hostapd_select_queue(struct net_device * dev, struct sk_buff *skb)
    spin_lock_bh( &pAdapter->staInfo_lock );
    if (FALSE == vos_is_macaddr_equal(&pAdapter->aStaInfo[STAId].macAddrSTA, pDestMacAddress))
    {
-      VOS_TRACE( VOS_MODULE_ID_HDD_SOFTAP, VOS_TRACE_LEVEL_ERROR,
+      VOS_TRACE( VOS_MODULE_ID_HDD_SOFTAP, VOS_TRACE_LEVEL_INFO,
                    "%s: Station MAC address does not matching", __func__);
 
       *pSTAId = HDD_WLAN_INVALID_STA_ID;
@@ -1905,7 +1905,14 @@ release_lock:
     spin_unlock_bh( &pAdapter->staInfo_lock );
 done:
    skb->priority = up;
-   queueIndex = hddLinuxUpToAcMap[skb->priority];
+   if(skb->priority < SME_QOS_WMM_UP_MAX)
+         queueIndex = hddLinuxUpToAcMap[skb->priority];
+   else
+   {
+       VOS_TRACE(VOS_MODULE_ID_HDD, WMM_TRACE_LEVEL_INFO,
+                 "%s: up=%d is going beyond max value", __func__, up);
+      queueIndex = hddLinuxUpToAcMap[SME_QOS_WMM_UP_BE];
+   }
 
    return queueIndex;
 }
@@ -1961,14 +1968,22 @@ v_U16_t hdd_wmm_select_queue(struct net_device * dev, struct sk_buff *skb)
       if (pAdapter->isVosLowResource && is_dhcp_packet(skb))
       {
          VOS_TRACE(VOS_MODULE_ID_HDD, WMM_TRACE_LEVEL_WARN,
-                   "%s: Making priority of DHCP packet as VOICE", __func__);
+                   "%s: BestEffort Tx Queue is 3/4th full"
+                   " Make DHCP packet's pri as VO", __func__);
          up = SME_QOS_WMM_UP_VO;
          ac = hddWmmUpToAcMap[up];
       }
    }
 done:
    skb->priority = up;
-   queueIndex = hddLinuxUpToAcMap[skb->priority];
+   if(skb->priority < SME_QOS_WMM_UP_MAX)
+         queueIndex = hddLinuxUpToAcMap[skb->priority];
+   else
+   {
+       VOS_TRACE(VOS_MODULE_ID_HDD, WMM_TRACE_LEVEL_INFO,
+                 "%s: up=%d is going beyond max value", __func__, up);
+      queueIndex = hddLinuxUpToAcMap[SME_QOS_WMM_UP_BE];
+   }
 
    return queueIndex;
 }
@@ -2476,7 +2491,16 @@ hdd_wlan_wmm_status_e hdd_wmm_addts( hdd_adapter_t* pAdapter,
    // we assume the tspec has already been validated by the caller
 
    pQosContext->handle = handle;
-   pQosContext->acType = hddWmmUpToAcMap[pTspec->ts_info.up];
+   if (pTspec->ts_info.up < HDD_WMM_UP_TO_AC_MAP_SIZE)
+      pQosContext->acType = hddWmmUpToAcMap[pTspec->ts_info.up];
+   else {
+      VOS_TRACE(VOS_MODULE_ID_HDD, WMM_TRACE_LEVEL_ERROR,
+                "%s: ts_info.up (%d) larger than max value (%d), "
+                "use default acType (%d)",
+                __func__, pTspec->ts_info.up,
+                HDD_WMM_UP_TO_AC_MAP_SIZE - 1, hddWmmUpToAcMap[0]);
+      pQosContext->acType = hddWmmUpToAcMap[0];
+   }
    pQosContext->pAdapter = pAdapter;
    pQosContext->qosFlowId = 0;
    pQosContext->magic = HDD_WMM_CTX_MAGIC;
